@@ -1,0 +1,231 @@
+---
+title: "Fledging success: climwin and bayesian regresson"
+output: html_notebook
+---
+
+```{r}
+# ----------------- LIBRARIES ----------------- #
+library(MASS)
+library(Matrix)
+library(lme4)
+library(readxl)
+library(arm)
+library(rmarkdown)
+library(ggplot2)
+library(MuMIn)
+library(climwin)
+library(rstanarm)
+library(shinystan)
+library(emmeans)
+library(magrittr)
+library(dplyr)
+library(sjPlot)
+library(sjstats)
+library(modelr)
+```
+```{r}
+# ----------------- DATA LOAD ----------------- #
+#####Clim windows#####
+
+Clim <- read_excel("C:/Users/.../Dataset.xlsx", sheet = "SST")
+View(Clim)
+
+Clim2 <- read_excel("C:/Users/.../Dataset.xlsx", sheet = "Rainfall")
+
+View(Clim2)
+
+Biol  <- read_excel("C:/Users/.../Dataset.xlsx",sheet = "Fprop_clim")
+View(Biol)
+names(Biol)
+
+#####Bayesian regression#####
+data<- read_excel("C:/Users/.../Dataset.xlsx",sheet = "Fprop_bayes")
+```
+
+
+```{r}
+# ----------------- VARIABLES ----------------- #
+#####Clim windows#####
+# RANDOM EFFECTS
+RDATE<-as.factor(Biol$MEAN_HATCH_DATE)
+Y<-as.factor(Biol$YEAR)
+MID<-as.factor(Biol$MALE_ID)
+FID<-as.factor(Biol$FEMALEID)
+#Fixed
+FS<-Biol$FLEDGED_PROP
+
+#Dependent
+BROOD<-as.factor(Biol$BROOD_SIZE)
+MAGE<-rescale(Biol$AGEMALE)
+FAGE<-rescale(Biol$AGEFEM)
+PR<-rescale(Biol$JULIAN_HATCH_DAY)
+
+
+#####Bayesian regression#####
+# RANDOM EFFECTS
+
+Y<-as.factor(data$YEAR)
+RDATE<-as.factor(data$HATCH_DATE_Rand)
+MID<-as.factor(data$MALE_ID)
+FID<-as.factor(data$FEMALEID)
+
+# DEPENDENT VARIABLE
+FS<-data$FLEDGED_PROP
+
+# INDEPENDENT VARIABLES
+PR<-rescale(data$JULIAN_HATCH_DAY)
+BROOD<-as.factor(data$BROOD_SIZE)
+RAIN<-rescale(data$RAINtrue)
+
+
+```
+
+
+```{r}
+#####Clim windows#####
+#Basal model selection
+m1<-lmer(FS ~ (1|Y)+(1|FID)+(1|MID)+(1|RDATE)+BROOD+PR,data=Biol)
+m2<-lmer(FS ~ (1|Y)+(1|FID)+(1|MID)+(1|RDATE)+BROOD +PR+ FAGE + I(FAGE^2),data=Biol)
+m3<-lmer(FS ~ (1|Y)+(1|FID)+(1|MID)+(1|RDATE)+BROOD +PR+ MAGE+I(MAGE^2),data=Biol)
+m4<-lmer(FS ~ (1|Y)+(1|FID)+(1|MID)+(1|RDATE)+BROOD +PR+ FAGE+MAGE,data=Biol)
+m5<-lmer(FS ~ (1|Y)+(1|FID)+(1|MID)+(1|RDATE)+BROOD +PR+ FAGE + I(FAGE^2)+MAGE+I(MAGE^2),data=Biol)
+
+
+v<-model.sel(m1,m2,m3,m4,m5)
+v
+```
+
+```{r}
+#Set date format
+Clim$Date<- as.Date(Clim$Date,format="%d %b %Y")
+Clim2$Date<- as.Date(Clim2$Date,format="%d %b %Y")
+Biol$MEAN_FLEDGING_DATE<- as.Date(Biol$MEAN_FLEDGING_DATE,format="%d %b %Y")
+```
+
+
+```{r}
+#Run sliding window analysis
+fled1<-slidingwin(xvar=list(rescale(Clim$SST),rescale(Clim2$RAIN)),exclude = NA,cdate=Clim$Date,bdate=Biol$MEAN_FLEDGING_DATE,baseline=glmer(FS~ (1|Y)+ (1|RDATE)+(1|FID)+(1|MID)+ PR + BROOD,family = binomial("logit"),weights = Biol$BROOD_SIZE,control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=2e5))),range= c(10,0),type="relative",
+                  cmissing = "method1",
+                  stat=c("mean","max","min","sum"),
+                  func = c("lin","quad"),cinterval="week")
+
+#Run random windows
+
+fled1r<-randwin(xvar=list(rescale(Clim$SST),rescale(Clim2$RAIN)),cdate=Clim$Date,bdate=Biol$MEAN_FLEDGING_DATE,baseline= glmer(FS~ (1|Y) +(1|RDATE)+(1|FID)+(1|MID)+ PR + BROOD,family = binomial("logit"),weights = Biol$BROOD_SIZE,control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=2e5))), range= c(10,0), type="relative",stat=c("mean","max","min","sum"),func = c("lin","quad"),cinterval="week",cmissing = "method1",repeats = 50)
+```
+
+
+
+```{r}
+#Show most supported windows
+fled1$combos
+```
+```{r}
+#Calculate Pc value for each most supported model
+pvalue(dataset = fled1[[1]]$Dataset, datasetrand = fled1r[[1]], metric = "C", sample.size = 26)
+
+
+pvalue(dataset = fled1[[2]]$Dataset, datasetrand = fled1r[[2]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[3]]$Dataset, datasetrand = fled1r[[3]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[4]]$Dataset, datasetrand = fled1r[[4]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[5]]$Dataset, datasetrand = fled1r[[5]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[6]]$Dataset, datasetrand = fled1r[[6]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[7]]$Dataset, datasetrand = fled1r[[7]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[8]]$Dataset, datasetrand = fled1r[[8]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[9]]$Dataset, datasetrand = fled1r[[9]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[10]]$Dataset, datasetrand = fled1r[[10]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[11]]$Dataset, datasetrand = fled1r[[11]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[12]]$Dataset, datasetrand = fled1r[[12]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[13]]$Dataset, datasetrand = fled1r[[13]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[14]]$Dataset, datasetrand = fled1r[[14]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[15]]$Dataset, datasetrand = fled1r[[15]], metric = "C", sample.size = 26)
+
+pvalue(dataset = fled1[[16]]$Dataset, datasetrand = fled1r[[16]], metric = "C", sample.size = 26)
+```
+
+```{r}
+#Inspection of the best supported model and distribution of ΔAICc values across all tested climate windows
+
+plothist(dataset = fled1[[4]]$Dataset, datasetrand = fled1r[[4]])
+
+plotdelta(dataset = fled1[[4]]$Dataset)
+```
+
+
+```{r}
+#Extraction of weather values for the best supported climate window
+write.csv(fled1[[4]]$BestModelData ,"fs_rainfall.csv")
+```
+
+```{r}
+#####Bayesian regression#####
+
+
+options(mc.cores = parallel::detectCores())
+
+m1<-stan_glmer(FS~(1|Y)+(1|RDATE)+(1|MID)+(1|FID)+BROOD+RAIN+PR,weights=data$BROOD_SIZE,family = binomial,chains=5,cores=8, prior = normal(0,1),iter=10000,seed=1234,data = data)
+
+
+#Posterior predictive checks
+launch_shinystan(m1)
+
+```
+
+```{r}
+#Print model summary 
+print(m1)
+tidy(m1,conf.int = TRUE, conf.method = "HPDinterval",conf.level = 0.89)  
+```
+
+
+```{r}
+library(emmeans)
+```
+```{r}
+#Estimate median value of each level of a category
+m1.1<-ref_grid(m1)
+m1.1
+regrid(emmeans(m1.1,"BSIZE"))%>%hpd.summary(prob=0.89)
+```
+
+
+```{r}
+####Coefficient of variation####
+data<- read_excel("C:/Users/.../Dataset.xlsx", sheet = "Fprop_CV")
+```
+```{r}
+CVS<-rescale(data$CV_RAIN)
+FS<-data$MEAN_FLED
+```
+
+```{r}
+m1<-stan_glm(FS~CVS,weights=data$count,family = binomial,chains=5,cores=8, prior = normal(0,1),iter=10000,seed=1234,data = data)
+launch_shinystan(m1)
+```
+
+```{r}
+print(m1)
+tidy(m1,conf.int = TRUE, conf.method = "HPDinterval",conf.level = 0.89)  
+```
+
+
+
+
+
+
+
+

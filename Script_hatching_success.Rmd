@@ -1,0 +1,360 @@
+---
+title: "Hatching success: climwin and bayesian regresson"
+output: html_notebook
+---
+```{r}
+# ----------------- LIBRARIES ----------------- #
+library(MASS)
+library(Matrix)
+library(lme4)
+library(readxl)
+library(arm)
+library(rmarkdown)
+library(ggplot2)
+library(MuMIn)
+library(climwin)
+library(rstanarm)
+library(shinystan)
+library(emmeans)
+library(magrittr)
+library(dplyr)
+library(sjPlot)
+library(sjstats)
+library(modelr)
+```
+```{r}
+# ----------------- DATA LOAD ----------------- #
+#####Clim windows#####
+
+Clim <- read_excel("C:/Users/.../Dataset.xlsx", sheet = "SST")
+View(Clim)
+
+Clim2 <- read_excel("C:/Users/.../Dataset.xlsx", sheet = "Rainfall")
+
+View(Clim2)
+
+Biol  <- read_excel("C:/Users/.../Dataset.xlsx",sheet = "Hprop_clim")
+View(Biol)
+names(Biol)
+
+#####Bayesian regression#####
+data<- read_excel("C:/Users/.../Dataset.xlsx",sheet = "Hprop_bayes")
+```
+
+
+```{r}
+# ----------------- VARIABLES ----------------- #
+#####Clim windows#####
+# RANDOM EFFECTS
+RDATE<-as.factor(Biol$MEAN_LAY_Date)
+Y<-as.factor(Biol$YEAR)
+MID<-as.factor(Biol$MALE_ID)
+FID<-as.factor(Biol$FEMALEID)
+#Fixed
+FS<-Biol$HATC_PROP
+
+#Dependent
+BROOD<-as.factor(Biol$CLUTCH_SIZE)
+MAGE<-rescale(Biol$AGEMALE)
+FAGE<-rescale(Biol$AGEFEM)
+PR<-rescale(Biol$JULIAN_LAY_DAY)
+
+
+#####Bayesian regression#####
+# RANDOM EFFECTS
+
+Y<-as.factor(data$YEAR)
+RDATE<-as.factor(data$MEAN_LAY_Date)
+MID<-as.factor(data$MALE_ID)
+FID<-as.factor(data$FEMALEID)
+
+# DEPENDENT VARIABLE
+FS<-data$FLEDGED_PROP
+
+# INDEPENDENT VARIABLES
+PR<-rescale(data$JULIAN_LAY_DAY)
+BROOD<-as.factor(data$CLUTCH_SIZE)
+RAIN<-rescale(data$RAINFALL)
+SSTz<-rescale(data$SST)
+
+
+```
+
+```{r}
+```{r}
+#####Clim windows#####
+#Basal model selection
+m1<-lmer(HS ~ (1|Y)+(1|FID)+(1|MID)+(1|RDATE)+BROOD+PR,data=Biol)
+m2<-lmer(HS ~ (1|Y)+(1|FID)+(1|MID)+(1|RDATE)+BROOD +PR+ FAGE + I(FAGE^2),data=Biol)
+m3<-lmer(HS ~ (1|Y)+(1|FID)+(1|MID)+(1|RDATE)+BROOD +PR+ MAGE+I(MAGE^2),data=Biol)
+m4<-lmer(HS ~ (1|Y)+(1|FID)+(1|MID)+(1|RDATE)+BROOD +PR+ FAGE+MAGE,data=Biol)
+m5<-lmer(HS ~ (1|Y)+(1|FID)+(1|MID)+(1|RDATE)+BROOD +PR+ FAGE + I(FAGE^2)+MAGE+I(MAGE^2),data=Biol)
+
+
+v<-model.sel(m1,m2,m3,m4,m5)
+v
+```
+
+
+```{r}
+#Set date format
+Clim$Date<- as.Date(Clim$Date,format="%d %b %Y")
+Clim2$Date<- as.Date(Clim2$Date,format="%d %b %Y")
+Biol$HATCH_DATE<- as.Date(Biol$HATCH_DATE,format="%d %b %Y")
+
+```
+
+
+```{r}
+#Run sliding window analysis
+hatch1<-slidingwin(xvar=list(rescale(Clim$SST),rescale(Clim2$RAIN)),exclude = NA,cdate=Clim$Date,bdate=Biol$HATCH_DATE,baseline=glmer(HS~ (1|MID)+(1|FID)+(1|Y)+ (1|DAT)+ PR + N + FAGE+I(FAGE^2),family = binomial("logit"),weights = Biol$CLUTCH_SIZE,control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=2e5))),range= c(6,0),type="relative",
+                  cmissing = "method1",
+                  stat=c("mean","max","min","sum"),
+                  func = c("lin","quad"),cinterval="week")
+#Run random windows
+hatch1r<-randwin(xvar=list(rescale(Clim$SST),rescale(Clim2$RAIN)),cdate=Clim$Date,bdate=Biol$HATCH_DATE,baseline= glmer(HS~ (1|MID)+(1|FID)+(1|Y)+ (1|DAT)+ PR + N+ FAGE+I(FAGE^2),family = binomial("logit"),weights = Biol$CLUTCH_SIZE,control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=2e5))), range= c(6,0), type="relative",stat=c("mean","max","min","sum"),func = c("lin","quad"),cinterval="week",cmissing = "method1",repeats = 50)
+
+#When running the GLMMs, a singular fit warning is displayed. Both MID and FID random effects are estimated as zero. Both random terms were dropped from the final analysis.As Bolker points out, dropping this terms from the models do not affect any of the estimated quantities. See https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html#singular-models-random-effect-variances-estimated-as-zero-or-correlations-estimated-as---1
+
+
+```
+
+```{r}
+#Show most supported windows
+hatch1$combos
+```
+
+
+```{r}
+
+#Calculate Pc value for each most supported model
+pvalue(dataset = hatch1[[1]]$Dataset, datasetrand = hatch1r[[1]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[2]]$Dataset, datasetrand = hatch1r[[2]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[3]]$Dataset, datasetrand = hatch1r[[3]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[4]]$Dataset, datasetrand = hatch1r[[4]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[5]]$Dataset, datasetrand = hatch1r[[5]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[6]]$Dataset, datasetrand = hatch1r[[6]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[7]]$Dataset, datasetrand = hatch1r[[7]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[8]]$Dataset, datasetrand = hatch1r[[8]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[9]]$Dataset, datasetrand = hatch1r[[9]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[10]]$Dataset, datasetrand = hatch1r[[10]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[11]]$Dataset, datasetrand = hatch1r[[11]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[12]]$Dataset, datasetrand = hatch1r[[12]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[13]]$Dataset, datasetrand = hatch1r[[13]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[14]]$Dataset, datasetrand = hatch1r[[14]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[15]]$Dataset, datasetrand = hatch1r[[15]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch1[[16]]$Dataset, datasetrand = hatch1r[[16]], metric = "C", sample.size = 26)
+```
+
+
+```{r}
+#Correlation between the SST and rainfall windows
+cross1<-crosswin(xvar=list(rescale(Clim$SST)),xvar2 = list(rescale(Clim2$RAIN)),stat ="mean",stat2 = "min",cdate = Clim$Date,bdate = Biol$HATCH_DATE,range = c(6,0),type = "relative",cmissing = "method1",cinterval = "week")
+
+plotcor(cross1,type="C")
+```
+
+
+
+
+```{r}
+#Inspection of the best supported models
+plothist(dataset = hatch1[[9]]$Dataset, datasetrand = hatch1r[[9]])
+
+plothist(dataset = hatch1[[14]]$Dataset, datasetrand = hatch1r[[14]])
+```
+
+```{r}
+#Extraction of weather conditions for further inspection
+Biol$signal1<-hatch1[[9]]$BestModelData$climate
+S1<-Biol$signal1
+
+
+Biol$signal2<-hatch1[[14]]$BestModelData$climate
+S2<-Biol$signal2
+```
+```{r}
+#Rerun of climwin analysis: searching rainfall's climatic window values while controlling for sst 
+
+hatch_sst_on_rain<-slidingwin(xvar=list(rescale(Clim2$RAIN)),exclude = NA,
+                        cdate=Clim$Date,
+                        bdate=Biol$HATCH_DATE,baseline= glmer(HS~ (1|Y)+ (1|DAT)+ PR + N+ FAGE+I(FAGE^2)+S1+I(S1^2),family = binomial("logit"),weights = Biol$CLUTCH_SIZE,control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=2e5))), range= c(6,0),
+                        type="relative",
+                       cmissing = "method1",
+                        stat=c("mean","max","sum","min"),
+                        func = c("lin","quad"),
+                        cinterval="week")
+
+hatch_sst_on_rainr<-randwin(xvar=list(rescale(Clim2$RAIN)),exclude = NA,
+                        cdate=Clim$Date,
+                        bdate=Biol$HATCH_DATE,baseline= glmer(HS~ (1|Y)+ (1|DAT)+ PR + N+ FAGE+I(FAGE^2)+S1+I(S1^2),family = binomial("logit"),weights = Biol$CLUTCH_SIZE,control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=2e5))),
+                        range= c(6,0),
+                        type="relative",
+                       cmissing = "method1",
+                        stat=c("mean","max","sum","min"),
+                        func = c("lin","quad"),
+                        cinterval="week",repeats=50)
+
+```
+
+```{r}
+#Show most supported windows
+
+hatch_sst_on_rain$combos
+```
+
+
+```{r}
+#Calculate Pc value for each most supported model
+pvalue(dataset = hatch_sst_on_rain[[1]]$Dataset, datasetrand = hatch_sst_on_rainr[[1]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_sst_on_rain[[2]]$Dataset, datasetrand = hatch_sst_on_rainr[[2]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_sst_on_rain[[3]]$Dataset, datasetrand = hatch_sst_on_rainr[[3]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_sst_on_rain[[4]]$Dataset, datasetrand = hatch_sst_on_rainr[[4]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_sst_on_rain[[5]]$Dataset, datasetrand = hatch_sst_on_rainr[[5]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_sst_on_rain[[6]]$Dataset, datasetrand = hatch_sst_on_rainr[[6]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_sst_on_rain[[7]]$Dataset, datasetrand = hatch_sst_on_rainr[[7]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_sst_on_rain[[8]]$Dataset, datasetrand = hatch_sst_on_rainr[[8]], metric = "C", sample.size = 26)
+```
+
+
+```{r}
+#Rerun of climwin analysis: searching sst's climatic window values while controlling for rainfall 
+hatch_rain_on_sst<-slidingwin(xvar=list(rescale(Clim$SST)),exclude = NA,
+                        cdate=Clim$Date,
+                         bdate=Biol$HATCH_DATE,baseline= glmer(HS~ (1|Y)+ (1|DAT)+ PR + N+ FAGE+I(FAGE^2)+S2+I(S2^2),family = binomial("logit"),weights = Biol$CLUTCH_SIZE,control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=2e5))),
+                        range= c(6,0),
+                        type="relative",
+                       cmissing = "method1",
+                        stat=c("mean","max","sum","min"),
+                        func = c("lin","quad"),
+                        cinterval="week")
+hatch_rain_on_sstR<-randwin(xvar=list(rescale(Clim$SST)),exclude = NA,
+                        cdate=Clim$Date,
+                         bdate=Biol$HATCH_DATE,baseline= glmer(HS~ (1|Y)+ (1|DAT)+ PR + N+ FAGE+I(FAGE^2)+S2+I(S2^2),family = binomial("logit"),weights = Biol$CLUTCH_SIZE,control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun=2e5))),
+                        range= c(6,0),
+                        type="relative",
+                       cmissing = "method1",
+                        stat=c("mean","max","sum","min"),
+                        func = c("lin","quad"),
+                        cinterval="week",repeats=50)
+```
+
+```{r}
+hatch_rain_on_sst$combos
+```
+
+
+
+```{r}
+pvalue(dataset = hatch_rain_on_sst[[1]]$Dataset, datasetrand = hatch_rain_on_sstR[[1]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_rain_on_sst[[2]]$Dataset, datasetrand = hatch_rain_on_sstR[[2]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_rain_on_sst[[3]]$Dataset, datasetrand = hatch_rain_on_sstR[[3]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_rain_on_sst[[4]]$Dataset, datasetrand = hatch_rain_on_sstR[[4]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_rain_on_sst[[5]]$Dataset, datasetrand = hatch_rain_on_sstR[[5]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_rain_on_sst[[6]]$Dataset, datasetrand = hatch_rain_on_sstR[[6]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_rain_on_sst[[7]]$Dataset, datasetrand = hatch_rain_on_sstR[[7]], metric = "C", sample.size = 26)
+
+pvalue(dataset = hatch_rain_on_sst[[8]]$Dataset, datasetrand = hatch_rain_on_sstR[[8]], metric = "C", sample.size = 26)
+
+plothist(dataset = hatch_rain_on_sst[[5]]$Dataset, datasetrand = hatch_rain_on_sstR[[5]])
+```
+
+
+```{r}
+library(sjPlot)
+library(sjstats)
+library(modelr)
+```
+```{r}
+#Extraction of weather values for the best supported climate window
+write.csv(hatch_rain_on_sst[[5]]$BestModelData,"hatch_rain_on_sst.csv")
+```
+
+
+```{r}
+#####Bayesian regression#####
+
+
+options(mc.cores = parallel::detectCores())
+
+m1<-stan_glmer(HP~(1|Y)+(1|D)+(1|MID)+(1|FID)+E+SSTz+I(SSTz^2)+RAINz+I(RAINz^2)+PU+FAGE+I(FAGE^2),family = binomial,weights = data$CLUTCH_SIZE,chains=5,cores=8, prior = normal(0,1),iter=10000,seed=1234,data = data)
+
+
+#Posterior predictive checks
+launch_shinystan(m1)
+
+```
+
+```{r}
+print(m1)
+```
+
+```{r}
+tidy(m1,conf.int = TRUE, conf.method = "HPDinterval",conf.level = 0.89)  
+
+```
+
+
+```{r}
+library(emmeans)
+```
+```{r}
+#Estimate median value of each level of a category
+m1.1<-ref_grid(m1)
+m1.1
+regrid(emmeans(m1.1,"E"))%>%hpd.summary(prob=0.89)
+```
+
+
+
+```{r}
+####Coefficient of variation####
+data<- read_excel("C:/Users/.../Dataset.xlsx", sheet = "Hprop_CV")
+```
+```{r}
+CVS<-rescale(data$CV_SST)
+CVR<-rescale(data$CV_RAIN)
+HS<-data$`MEAN_HATCH`
+
+```
+
+```{r}
+m1<-stan_glm(HS~CVS+CVR,weights=data$count,family = binomial,chains=5,cores=8, prior = normal(0,1),iter=10000,seed=1234,data = data)
+launch_shinystan(m1)
+```
+
+```{r}
+print(m1)
+tidy(m1,conf.int = TRUE, conf.method = "HPDinterval",conf.level = 0.89)  
+```
+
+
+

@@ -1,0 +1,252 @@
+---
+title: "Fledgling body condition: climwin and bayesian regresson"
+output: html_notebook
+---
+
+
+
+```{r}
+# ----------------- LIBRARIES ----------------- #
+library(MASS)
+library(Matrix)
+library(lme4)
+library(readxl)
+library(arm)
+library(rmarkdown)
+library(ggplot2)
+library(MuMIn)
+library(climwin)
+library(rstanarm)
+library(shinystan)
+library(emmeans)
+library(magrittr)
+library(dplyr)
+library(sjPlot)
+library(sjstats)
+library(modelr)
+```
+
+
+```{r}
+# ----------------- DATA LOAD ----------------- #
+#####Clim windows#####
+
+Clim <- read_excel("C:/Users/.../Dataset.xlsx", sheet = "SST")
+View(Clim)
+
+Clim2 <- read_excel("C:/Users/.../Dataset.xlsx", sheet = "Rainfall")
+
+View(Clim2)
+
+Biol  <- read_excel("C:/Users/.../Dataset.xlsx",sheet = "BD_clim")
+View(Biol)
+names(Biol)
+
+#####Bayesian regression#####
+data<- read_excel("C:/Users/.../Dataset.xlsx",sheet = "BD_bayes")
+```
+
+
+```{r}
+# ----------------- VARIABLES ----------------- #
+#####Clim windows#####
+# RANDOM EFFECTS
+NEST<-as.factor(Biol$NEST_ID)
+CH<-as.factor(Biol$Year)
+RDATE<-as.factor(Biol$JULIAN_HATCH_DAY_RAND)
+FID<-as.factor(Biol$FEMALEID)
+MID<-as.factor(Biol$MALE_ID)
+
+# DEPENDENT VARIABLE
+BD<-Biol$body_condition
+
+
+
+# INDEPENDENT VARIABLES
+
+MAGE<-rescale(Biol$AGEMALE)
+FAGE<-rescale(Biol$AGEFEM)
+PR<-rescale(Biol$JULIAN_HATCH_DAY)
+BROOD<-as.factor(Biol$BROOD_SIZE)
+
+
+
+
+
+
+#####Bayesian regression#####
+# RANDOM EFFECTS
+CO<-as.factor(data$YEAR)
+FI<-as.factor(data$FEMALEID)
+MI<-as.factor(data$MALE_ID)
+N<-as.factor(data$NEST_ID)
+RHD<-as.factor(data$HATCH_DATE_Rand)
+
+
+# DEPENDENT VARIABLE
+BD<-data$Body_cond
+
+
+# INDEPENDENT VARIABLES
+MSST<-rescale(data$MIN_SST)
+BSIZE<-as.factor(data$BROOD_SIZE)
+HDT<-rescale(data$JULIAN_HATCH_DAY)
+
+```
+
+
+
+```{r}
+#####Clim windows#####
+#Basal model selection
+m1<-lmer(BD ~ (1|CH)+(1|FID)+(1|MID)+(1|NEST)+(1|RDATE)+BROOD+PR,data=Biol)
+m2<-lmer(BD ~ (1|CH)+(1|FID)+(1|MID)+(1|NEST)+(1|RDATE)+BROOD +PR+ FAGE + I(FAGE^2),data=Biol)
+m3<-lmer(BD ~ (1|CH)+(1|FID)+(1|MID)+(1|NEST)+(1|RDATE)+BROOD +PR+ MAGE+I(MAGE^2),data=Biol)
+m4<-lmer(BD ~ (1|CH)+(1|FID)+(1|MID)+(1|NEST)+(1|RDATE)+BROOD +PR+ FAGE+MAGE,data=Biol)
+m5<-lmer(BD ~ (1|CH)+(1|FID)+(1|MID)+(1|NEST)+(1|RDATE)+BROOD +PR+ FAGE + I(FAGE^2)+MAGE+I(MAGE^2),data=Biol)
+
+
+v<-model.sel(m1,m2,m3,m4,m5)
+v
+```
+
+```{r}
+#Set date format
+Clim$Date<- as.Date(Clim$Date,format="%d %b %Y")
+Clim2$Date<- as.Date(Clim2$Date,format="%d %b %Y")
+Biol$estfled<- as.Date(Biol$Mean_fledge_date,format="%d %b %Y")
+```
+
+```{r}
+#Run sliding window analysis
+mclim<-slidingwin(xvar=list(rescale(Clim$SST),rescale(Clim2$RAIN)),exclude = NA,
+                        cdate=Clim$Date,
+                        bdate=Biol$estfled,
+                        baseline=lmer(BD ~ (1|CH)+(1|FID)+(1|MID)+(1|NEST)+(1|RDATE)+BROOD+PR,data=Biol),
+                        range= c(16,0),
+                        type="relative",
+                       cmissing = "method1",
+                        stat=c("mean","max","sum","min"),
+                        func = c("lin","quad"),
+                        cinterval="week")
+#Run random windows
+mclimrand<-randwin(xvar=list(rescale(Clim$SST),rescale(Clim2$RAIN)),
+                        cdate=Clim$Date,
+                        bdate=Biol$estfled,
+                        baseline= lmer(BD ~ (1|CH)+(1|FID)+(1|MID)+(1|NEST)+(1|RDATE)+BROOD+PR,data=Biol),
+                        range= c(16,0),
+                        type="relative",
+                        stat=c("mean","max","min","sum"),
+                        func = c("lin","quad"),
+                        cinterval="week",cmissing = "method1",
+                        repeats = 50)
+```
+```{r}
+#Show most supported windows
+mclim$combos
+```
+```{r}
+#Calculate Pc value for each most supported model
+pvalue(dataset = mclim[[1]]$Dataset,datasetrand = mclimrand[[1]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[2]]$Dataset,datasetrand = mclimrand[[2]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[3]]$Dataset,datasetrand = mclimrand[[3]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[4]]$Dataset,datasetrand = mclimrand[[4]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[5]]$Dataset,datasetrand = mclimrand[[5]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[6]]$Dataset,datasetrand = mclimrand[[6]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[7]]$Dataset,datasetrand = mclimrand[[7]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[8]]$Dataset,datasetrand = mclimrand[[8]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[9]]$Dataset,datasetrand = mclimrand[[9]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[10]]$Dataset,datasetrand = mclimrand[[10]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[11]]$Dataset,datasetrand = mclimrand[[11]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[12]]$Dataset,datasetrand = mclimrand[[12]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[13]]$Dataset,datasetrand = mclimrand[[13]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[14]]$Dataset,datasetrand = mclimrand[[14]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[15]]$Dataset,datasetrand = mclimrand[[15]],metric="C",sample.size = 21)
+
+pvalue(dataset = mclim[[16]]$Dataset,datasetrand = mclimrand[[16]],metric="C",sample.size = 21)
+
+```
+
+```{r}
+#Inspection of the best supported model and distribution of ΔAICc values across all tested climate windows
+plothist(dataset = mclim[[7]]$Dataset,datasetrand = mclimrand[[7]])
+plotdelta(dataset = mclim[[7]]$Dataset)
+
+```
+
+
+```{r}
+#Extraction of weather values for the best supported climate window
+write.csv(mclim[[7]]$BestModelData ,"body_cond_sst_min.csv")
+```
+
+
+```{r}
+#####Bayesian regression#####
+
+
+options(mc.cores = parallel::detectCores())
+
+
+m1<-stan_glmer(BD~(1|CO)+(1|FI)+(1|MI)+(1|RHD)+(1|N)+BSIZE+MSST+HDT,family = gaussian,chains=5,cores=8, prior = normal(0,1),iter=10000,seed=1234,data = data)
+
+
+#Posterior predictive checks
+launch_shinystan(m1)
+
+
+```
+
+```{r}
+#Print model summary 
+print(m1)
+tidy(m1,conf.int = TRUE, conf.method = "HPDinterval",conf.level = 0.89)  
+```
+
+
+```{r}
+library(emmeans)
+```
+```{r}
+#Estimate median value of each level of a category
+m1.1<-ref_grid(m1)
+m1.1
+regrid(emmeans(m1.1,"BSIZE"))%>%hpd.summary(prob=0.89)
+```
+
+
+```{r}
+####Coefficient of variation####
+data<- read_excel("C:/Users/.../Dataset.xlsx", sheet = "BD_CV")
+```
+```{r}
+CVS<-rescale(data$CV_SST)
+BD<-data$MEAN_Body_cond
+```
+
+```{r}
+m1<-stan_glm(BD~CVS,family = gaussian(),chains=5,cores=8, prior = normal(0,1),iter=10000,seed=1234,data = data)
+launch_shinystan(m1)
+```
+
+```{r}
+print(m1)
+tidy(m1,conf.int = TRUE, conf.method = "HPDinterval",conf.level = 0.89)  
+```
+
+
+
